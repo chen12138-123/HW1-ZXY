@@ -13,13 +13,53 @@ def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
 
-def featurize(paths, image_size: int, color_bins: int, edge_bins: int, progress_every: int = 500):
-    X = np.zeros((len(paths), 3 * color_bins + 256 + edge_bins), dtype=np.float32)
+def featurize(
+    paths,
+    image_size: int,
+    color_bins: int,
+    edge_bins: int,
+    feature_set: str,
+    hog_cell: int,
+    hog_block: int,
+    hog_bins: int,
+    progress_every: int = 500,
+    n_jobs: int = 1,
+):
+    if n_jobs and n_jobs > 1:
+        from joblib import Parallel, delayed
+
+        def _one(p):
+            return extract_features(
+                p,
+                image_size=image_size,
+                color_bins=color_bins,
+                edge_bins=edge_bins,
+                feature_set=feature_set,
+                hog_cell=hog_cell,
+                hog_block=hog_block,
+                hog_bins=hog_bins,
+            )
+
+        feats = Parallel(n_jobs=n_jobs, prefer="threads")(delayed(_one)(p) for p in paths)
+        return np.asarray(feats, dtype=np.float32)
+
+    X = []
     for i, p in enumerate(paths):
-        X[i] = extract_features(p, image_size=image_size, color_bins=color_bins, edge_bins=edge_bins)
+        X.append(
+            extract_features(
+                p,
+                image_size=image_size,
+                color_bins=color_bins,
+                edge_bins=edge_bins,
+                feature_set=feature_set,
+                hog_cell=hog_cell,
+                hog_block=hog_block,
+                hog_bins=hog_bins,
+            )
+        )
         if progress_every and (i + 1) % progress_every == 0:
             print(f"Featurizing: {i+1}/{len(paths)}")
-    return X
+    return np.asarray(X, dtype=np.float32)
 
 
 def accuracy(y_true, y_pred) -> float:
@@ -44,9 +84,14 @@ if __name__ == "__main__":
     parser.add_argument("--image_size", type=int, default=64)
     parser.add_argument("--color_bins", type=int, default=16)
     parser.add_argument("--edge_bins", type=int, default=16)
+    parser.add_argument("--feature_set", type=str, default="hog", choices=["basic", "spatial", "hog", "basic_hog", "spatial_hog"])
+    parser.add_argument("--hog_cell", type=int, default=8)
+    parser.add_argument("--hog_block", type=int, default=2)
+    parser.add_argument("--hog_bins", type=int, default=9)
     parser.add_argument("--classifier", type=str, default="linear_svm", choices=["linear_svm", "logistic", "rf"])
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model_out", type=str, default="best_model.joblib")
+    parser.add_argument("--n_jobs", type=int, default=1)
     parser.add_argument("--max_train", type=int, default=0)
     parser.add_argument("--max_val", type=int, default=0)
     parser.add_argument("--max_test", type=int, default=0)
@@ -72,9 +117,41 @@ if __name__ == "__main__":
         test_paths = [test_paths[i] for i in idx]
         test_labels = [test_labels[i] for i in idx]
 
-    X_train = featurize(train_paths, args.image_size, args.color_bins, args.edge_bins)
-    X_val = featurize(val_paths, args.image_size, args.color_bins, args.edge_bins, progress_every=0)
-    X_test = featurize(test_paths, args.image_size, args.color_bins, args.edge_bins, progress_every=0)
+    X_train = featurize(
+        train_paths,
+        args.image_size,
+        args.color_bins,
+        args.edge_bins,
+        args.feature_set,
+        args.hog_cell,
+        args.hog_block,
+        args.hog_bins,
+        n_jobs=args.n_jobs,
+    )
+    X_val = featurize(
+        val_paths,
+        args.image_size,
+        args.color_bins,
+        args.edge_bins,
+        args.feature_set,
+        args.hog_cell,
+        args.hog_block,
+        args.hog_bins,
+        progress_every=0,
+        n_jobs=args.n_jobs,
+    )
+    X_test = featurize(
+        test_paths,
+        args.image_size,
+        args.color_bins,
+        args.edge_bins,
+        args.feature_set,
+        args.hog_cell,
+        args.hog_block,
+        args.hog_bins,
+        progress_every=0,
+        n_jobs=args.n_jobs,
+    )
 
     clf = create_classifier(args.classifier, seed=args.seed)
     clf.fit(X_train, train_labels)
@@ -98,6 +175,10 @@ if __name__ == "__main__":
             "image_size": args.image_size,
             "color_bins": args.color_bins,
             "edge_bins": args.edge_bins,
+            "feature_set": args.feature_set,
+            "hog_cell": args.hog_cell,
+            "hog_block": args.hog_block,
+            "hog_bins": args.hog_bins,
             "classifier": args.classifier,
             "seed": args.seed,
         },

@@ -24,9 +24,14 @@
 
 ## 2. 实验结果
 
-- **最终测试集准确率**: **98.81%**
+- **最终测试集准确率（传统机器学习实现）**: **80.41%**（Test Accuracy = 0.8041）
+- **实验配置**: `LinearSVC + StandardScaler`，`image_size=32`，`color_bins=16`，`edge_bins=16`，数据划分 8:1:1（seed=42）
 - **可视化结果**:
     - `confusion_matrix.png`: 详细分析了模型在 10 个类别上的分类精度。
+
+## 参考对比（不计入本实验要求）
+
+在不受“禁用深度学习框架”限制的版本中，我曾在相同数据划分策略下获得约 **98.81%** 的测试集准确率。该结果不属于本实验要求范围，当前仓库实现不包含对应训练代码，仅作为对比参考。
 
 ### 类别均值可视化 (`visualize_weights.py`)
 - **说明**: 生成每个类别的平均图像（Mean Image），用于观察不同地物类别的整体颜色与纹理差异。
@@ -38,7 +43,7 @@
 ## 4. 如何运行
 
 1. 安装依赖库: `pip install numpy pillow scikit-learn matplotlib seaborn joblib`
-2. 训练并评估（默认 LinearSVC）: `python train.py`
+2. 训练并评估（复现实验结果的推荐命令）: `python train.py --image_size 32 --color_bins 16 --edge_bins 16 --classifier linear_svm --n_jobs 4`
 3. 常用参数示例:
    - 使用 LogisticRegression: `python train.py --classifier logistic`
    - 使用 RandomForest: `python train.py --classifier rf`

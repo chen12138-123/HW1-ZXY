@@ -12,6 +12,10 @@ def save_misclassified_samples(model_path, root_dir, output_path='error_examples
     image_size = int(payload.get("image_size", 64))
     color_bins = int(payload.get("color_bins", 16))
     edge_bins = int(payload.get("edge_bins", 16))
+    feature_set = payload.get("feature_set", "basic")
+    hog_cell = int(payload.get("hog_cell", 8))
+    hog_block = int(payload.get("hog_block", 2))
+    hog_bins = int(payload.get("hog_bins", 9))
 
     image_paths, labels, _ = scan_eurosat(root_dir)
     _, _, (test_paths, test_labels) = split_dataset(image_paths, labels, split_ratio=(0.8, 0.1, 0.1), seed=seed)
@@ -20,7 +24,16 @@ def save_misclassified_samples(model_path, root_dir, output_path='error_examples
     
     misclassified = []
     for p, y in zip(test_paths, test_labels):
-        x = extract_features(p, image_size=image_size, color_bins=color_bins, edge_bins=edge_bins).reshape(1, -1)
+        x = extract_features(
+            p,
+            image_size=image_size,
+            color_bins=color_bins,
+            edge_bins=edge_bins,
+            feature_set=feature_set,
+            hog_cell=hog_cell,
+            hog_block=hog_block,
+            hog_bins=hog_bins,
+        ).reshape(1, -1)
         pred = int(model.predict(x)[0])
         if pred != int(y):
             img = load_rgb_image(p, image_size=image_size)
