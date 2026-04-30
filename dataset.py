@@ -1,4 +1,5 @@
 import os
+import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
 from PIL import Image
@@ -31,49 +32,81 @@ class EuroSATDataset(Dataset):
             
         return image, label
 
-def get_dataloaders(root_dir, batch_size=64, split_ratio=(0.8, 0.1, 0.1)):
-    # 基础预处理
-    base_transform = [
-        transforms.Resize((64, 64)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    ]
+def get_dataloaders(
+    root_dir,
+    batch_size=64,
+    split_ratio=(0.8, 0.1, 0.1),
+    image_size=224,
+    normalize="imagenet",
+    num_workers=0,
+):
+    if normalize == "imagenet":
+        mean, std = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+    else:
+        mean, std = (0.5, 0.5, 0.5), (0.5, 0.5, 0.5)
+
+    train_transform = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(image_size, scale=(0.7, 1.0)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.RandomRotation(20),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+            transforms.RandomErasing(p=0.25, scale=(0.02, 0.15), ratio=(0.3, 3.3), value="random"),
+        ]
+    )
     
-    # 训练集增强
-    train_transform = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(),
-        transforms.RandomRotation(15),
-        *base_transform
-    ])
+    val_test_transform = transforms.Compose(
+        [
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ]
+    )
     
-    val_test_transform = transforms.Compose(base_transform)
-    
-    # 先加载不带 transform 的数据集，手动应用不同的 transform
     full_dataset = EuroSATDataset(root_dir)
     train_size = int(split_ratio[0] * len(full_dataset))
     val_size = int(split_ratio[1] * len(full_dataset))
     test_size = len(full_dataset) - train_size - val_size
     
     train_subset, val_subset, test_subset = random_split(
-        full_dataset, [train_size, val_size, test_size]
+        full_dataset, [train_size, val_size, test_size],
+        generator=torch.Generator().manual_seed(42)
     )
     
-    # 包装 Subset 以应用不同的 transforms
     class ApplyTransform(Dataset):
         def __init__(self, subset, transform):
             self.subset = subset
             self.transform = transform
         def __getitem__(self, index):
             x, y = self.subset[index]
-            if self.transform:
-                x = self.transform(x)
+            if self.transform: x = self.transform(x)
             return x, y
-        def __len__(self):
-            return len(self.subset)
+        def __len__(self): return len(self.subset)
 
-    train_loader = DataLoader(ApplyTransform(train_subset, train_transform), batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(ApplyTransform(val_subset, val_test_transform), batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(ApplyTransform(test_subset, val_test_transform), batch_size=batch_size, shuffle=False)
+    pin_memory = torch.cuda.is_available()
+    train_loader = DataLoader(
+        ApplyTransform(train_subset, train_transform),
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    val_loader = DataLoader(
+        ApplyTransform(val_subset, val_test_transform),
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+    test_loader = DataLoader(
+        ApplyTransform(test_subset, val_test_transform),
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
     
     return train_loader, val_loader, test_loader, full_dataset.classes

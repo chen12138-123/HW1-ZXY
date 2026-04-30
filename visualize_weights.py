@@ -1,46 +1,35 @@
 import torch
+import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
 from model import MLP
 
-def visualize_first_layer_weights(model_path, output_path='weight_visualization.png'):
-    # 初始化模型参数
-    input_size = 64 * 64 * 3
-    hidden_dims = [1024, 512, 256]
-    num_classes = 10
-    
-    # 加载模型
+def visualize_first_layer_weights(model_path, input_size, hidden_dims, num_classes, output_path='weight_visualization.png'):
     model = MLP(input_size, hidden_dims, num_classes)
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     
-    # 获取第一层权重: network[0] 是第一个 Linear 层
-    weights = model.network[0].weight.data.numpy() # 形状: (512, 12288)
+    # 提取第一层权重
+    weights = model.network[0].weight.data.numpy()
     
-    # 选择前 16 个神经元进行可视化
-    num_neurons = 16
+    num_neurons = 64
     plt.figure(figsize=(12, 12))
-    
     for i in range(num_neurons):
-        # 提取单个神经元的权重并 reshape 回图像尺寸 (C, H, W)
-        # 原始输入是展平的 RGB，所以是 (3, 64, 64)
-        weight_img = weights[i].reshape(3, 64, 64)
+        w = weights[i].reshape(3, 64, 64)
+        w_min, w_max = w.min(), w.max()
+        w = (w - w_min) / (w_max - w_min)
+        w = np.transpose(w, (1, 2, 0))
         
-        # 转换为 (H, W, C) 以便 matplotlib 显示
-        weight_img = weight_img.transpose(1, 2, 0)
-        
-        # 归一化到 [0, 1] 范围
-        w_min, w_max = weight_img.min(), weight_img.max()
-        weight_img = (weight_img - w_min) / (w_max - w_min)
-        
-        plt.subplot(4, 4, i + 1)
-        plt.imshow(weight_img)
+        plt.subplot(8, 8, i+1)
+        plt.imshow(w)
         plt.axis('off')
-        plt.title(f'Neuron {i+1}')
     
-    plt.tight_layout()
+    plt.suptitle('First Hidden Layer Weight Visualization (High-Accuracy Model)')
     plt.savefig(output_path)
-    print(f"Weights visualization saved to {output_path}")
     plt.close()
+    print(f"Weights visualization saved to {output_path}")
 
 if __name__ == "__main__":
-    visualize_first_layer_weights('best_model.pth')
+    input_size = 64 * 64 * 3
+    hidden_dims = [4096, 2048, 1024, 512, 256] 
+    num_classes = 10
+    visualize_first_layer_weights('best_model.pth', input_size, hidden_dims, num_classes)
