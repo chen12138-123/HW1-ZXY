@@ -1,35 +1,34 @@
-import torch
-import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
-from model import MLP
+from dataset import scan_eurosat
+from model import load_rgb_image
+import os
 
-def visualize_first_layer_weights(model_path, input_size, hidden_dims, num_classes, output_path='weight_visualization.png'):
-    model = MLP(input_size, hidden_dims, num_classes)
-    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-    
-    # 提取第一层权重
-    weights = model.network[0].weight.data.numpy()
-    
-    num_neurons = 64
-    plt.figure(figsize=(12, 12))
-    for i in range(num_neurons):
-        w = weights[i].reshape(3, 64, 64)
-        w_min, w_max = w.min(), w.max()
-        w = (w - w_min) / (w_max - w_min)
-        w = np.transpose(w, (1, 2, 0))
-        
-        plt.subplot(8, 8, i+1)
-        plt.imshow(w)
-        plt.axis('off')
-    
-    plt.suptitle('First Hidden Layer Weight Visualization (High-Accuracy Model)')
+def visualize_class_mean_images(root_dir: str, image_size: int = 64, samples_per_class: int = 200, output_path: str = "class_means.png"):
+    image_paths, labels, classes = scan_eurosat(root_dir)
+    per_class = {i: [] for i in range(len(classes))}
+    for p, y in zip(image_paths, labels):
+        if len(per_class[y]) < samples_per_class:
+            per_class[y].append(p)
+
+    means = []
+    for i in range(len(classes)):
+        imgs = [load_rgb_image(p, image_size=image_size) for p in per_class[i]]
+        mean_img = np.mean(np.stack(imgs, axis=0), axis=0) if imgs else np.zeros((image_size, image_size, 3), dtype=np.float32)
+        means.append(mean_img)
+
+    cols = 5
+    rows = int(np.ceil(len(classes) / cols))
+    plt.figure(figsize=(3 * cols, 3 * rows))
+    for i, (cls, mean_img) in enumerate(zip(classes, means)):
+        plt.subplot(rows, cols, i + 1)
+        plt.imshow(np.clip(mean_img, 0, 1))
+        plt.title(cls)
+        plt.axis("off")
+    plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
-    print(f"Weights visualization saved to {output_path}")
+    print(f"Saved class mean images to {output_path}")
 
 if __name__ == "__main__":
-    input_size = 64 * 64 * 3
-    hidden_dims = [4096, 2048, 1024, 512, 256] 
-    num_classes = 10
-    visualize_first_layer_weights('best_model.pth', input_size, hidden_dims, num_classes)
+    visualize_class_mean_images("EuroSAT_RGB", image_size=64)
