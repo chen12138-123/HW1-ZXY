@@ -1,43 +1,49 @@
-# EuroSAT 遥感图像分类项目 (HW1) - 极限优化版
+# EuroSAT 遥感图像分类项目 (HW1) - 最新训练版
 
-本项目使用多层感知机 (MLP) 对 EuroSAT 数据集进行土地覆盖分类。经过多轮架构调优和超参数实验，本项目已达到 MLP 模型在该任务上的性能极限。
+本项目使用卷积神经网络 ResNet18 对 EuroSAT 数据集进行 10 类土地覆盖分类，并保留 MLP 作为对比基线。当前默认训练配置以提升精度与泛化为目标（更强的数据增强、ImageNet 归一化、AdamW + Cosine 学习率、Label Smoothing、AMP）。
 
 ## 1. 项目实现步骤
 
 ### 数据处理 (`dataset.py`)
 - **数据集加载**: 自定义 `EuroSATDataset` 类。
-- **预处理**: 图像缩放至 64x64，进行归一化处理（均值 0.5，标准差 0.5）。
-- **稳健增强**: 引入了随机水平翻转、随机垂直翻转和 15 度随机旋转，有效提升了模型对卫星图像方向无关性的建模能力。
-- **数据划分**: 按照 8:1:1 的比例进行随机划分。
+- **数据划分**: 按照 8:1:1 的比例随机划分，并固定随机种子以保证可复现。
+- **预处理（ResNet18 默认）**: 输入尺寸统一为 224x224，并采用 ImageNet 归一化（mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)）。
+- **训练增强（ResNet18 默认）**: RandomResizedCrop、水平/垂直翻转、旋转、ColorJitter、RandomErasing；验证/测试仅 Resize + Normalize。
+- **MLP 基线**: 若选择 `--model mlp`，输入尺寸为 64x64，并使用 0.5/0.5 的归一化方式。
 
 ### 模型架构 (`model.py`)
-- **深度 MLP 架构**:
-    - **四层隐藏层**: 使用了 `[1024, 1024, 512, 256]` 的深层宽网络结构。
-    - **Batch Normalization**: 每个线性层后均配有 BN 层，极大地稳定了深层梯度的传播。
-    - **Dropout**: 设置了 0.3 的 Dropout 概率，在保证模型容量的同时强制提取鲁棒特征。
-- **激活函数**: 使用标准 ReLU 激活函数。
+- **ResNet18（默认）**: 使用 torchvision 的 ResNet18，将最后分类层替换为 10 类输出；支持 `--pretrained 1` 使用 ImageNet 预训练权重初始化。
+- **MLP（可选基线）**: 展平 64x64x3 输入并经过多层全连接 + BN + LeakyReLU + Dropout 的分类网络。
 
 ### 训练与评估 (`train.py`)
-- **优化器**: 使用带动量的随机梯度下降 (SGD, Momentum=0.9)，配合 L2 权重衰减 (1e-4)。
-- **学习率策略**: 使用 StepLR 调度器，在第 10 和第 20 个 Epoch 进行阶梯式衰减，确保模型在后期能精细收敛。
-- **训练轮数**: 增加至 30 个 Epoch，确保深层模型完全收敛。
+- **训练轮数**: 默认 150 个 Epoch（满足“训练 100 轮以上”的要求）。
+- **优化器**: AdamW（默认 lr=3e-4，weight_decay=1e-4）。
+- **学习率策略**: CosineAnnealingLR（余弦退火）。
+- **损失函数**: CrossEntropyLoss(label_smoothing=0.1)。
+- **AMP**: CUDA 环境默认开启混合精度训练，可用 `--no_amp` 关闭。
+- **模型保存**: 以验证集准确率为准保存最优模型到 `best_model.pth`，并使用该权重进行测试集评估。
 
-## 2. 实验结果 (极限性能)
+## 2. 实验结果
 
-- **最终测试集准确率**: **69.63%** (这是 MLP 在不使用卷积层情况下的极高表现)。
+- **最终测试集准确率（当前 best_model.pth）**: **98.81%**（ResNet18，测试集评估结果）。
 - **可视化结果**:
     - `learning_curves.png`: 展示了 Loss 和 Accuracy 的平稳优化过程。
     - `confusion_matrix.png`: 详细分析了模型在 10 个类别上的分类精度。
 
 ### 权重可视化与空间模式 (`visualize_weights.py`)
-- **观察**: 第一层 1024 个神经元的权重展现了复杂的光谱响应模式。通过可视化前 64 个神经元，我们可以观察到明显的颜色聚焦（如针对森林的绿色、针对水体的蓝色）以及初步的边缘检测纹理。
+- **说明**: 该脚本用于可视化当前 `best_model.pth` 的第一层权重。若模型为 MLP，则可将权重恢复为 64x64x3 形式进行可视化；若模型为 ResNet18，可视化结果更适合解释卷积核对颜色/纹理的响应模式。
 
 ## 3. 错误分析 (Error Analysis)
 
-通过 `error_analysis_visual.py` 生成的错例展示了模型在处理极度相似类别（如 AnnualCrop vs PermanentCrop）时的局限性。这些错误多源于地物在光谱特征上的高度重合，而 MLP 缺乏捕捉空间局部纹理（如作物的种植间距）的能力。
+通过 `error_analysis_visual.py` 生成的错例可以定位模型主要混淆对。即便在较高准确率下，某些类别仍可能因颜色/纹理相近、类别内部差异较大或空间结构相似而发生误判。
 
 ## 4. 如何运行
 
 1. 确保安装了依赖库: `pip install torch torchvision matplotlib seaborn scikit-learn`
-2. 运行训练脚本: `python train.py`
-3. 运行可视化脚本: `python visualize_weights.py` 和 `python error_analysis_visual.py`
+2. 运行训练脚本（默认 ResNet18 + 150 Epoch）: `python train.py`
+3. 常用参数示例:
+   - 使用预训练权重: `python train.py --model resnet18 --pretrained 1`
+   - 指定轮数与 batch: `python train.py --epochs 150 --batch_size 64`
+   - 显存不足时降分辨率: `python train.py --image_size 192`
+   - 使用 MLP 基线: `python train.py --model mlp`
+4. 运行可视化脚本: `python visualize_weights.py` 和 `python error_analysis_visual.py`
